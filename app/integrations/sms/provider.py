@@ -16,6 +16,10 @@ from app.config import settings
 log = structlog.get_logger(__name__)
 
 
+def _mask(phone: str) -> str:
+    return f"***{phone[-3:]}" if len(phone) > 3 else "***"
+
+
 class SMSProvider(abc.ABC):
     @abc.abstractmethod
     async def send(self, to: str, text: str) -> bool:
@@ -27,7 +31,8 @@ class NullSMSProvider(SMSProvider):
     """Fallback: logs instead of sending. Used when SMS is off or unconfigured."""
 
     async def send(self, to: str, text: str) -> bool:
-        log.info("sms.null.send", to=to, text=text)
+        # Don't put client names / phone numbers into the hosting provider's logs.
+        log.info("sms.null.send", to=_mask(to), length=len(text))
         return True
 
 
@@ -46,7 +51,7 @@ class TwilioSMSProvider(SMSProvider):
                 self._client.messages.create(body=text, from_=self._from, to=to)
                 return True
             except Exception as exc:  # pragma: no cover - network
-                log.error("sms.twilio.error", error=str(exc), to=to)
+                log.error("sms.twilio.error", error=str(exc), to=_mask(to))
                 return False
 
         return await asyncio.to_thread(_send)

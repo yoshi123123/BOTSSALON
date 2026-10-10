@@ -1,10 +1,12 @@
 """Admin panel: menu, today, stats, broadcast, CSV export. Access checked by Telegram ID/role."""
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime as dt
 import io
 
+import structlog
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
@@ -12,16 +14,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import AppointmentStatus, Role, User
-from app.keyboards.builders import admin_menu_kb
+from app.keyboards.builders import FREE_TEXT, admin_menu_kb
 from app.keyboards.callbacks import AdminCb, ConfirmCb
 from app.locales import t
 from app.repositories.appointments import AppointmentRepository
 from app.repositories.users import UserRepository
-from app.services.notifications import NotificationService
+from app.services.notifications import NotificationService, is_real_chat
 from app.states import BroadcastStates
-from app.utils.format import fmt_date, fmt_time
+from app.utils.format import chunk_text, csv_safe, fmt_date, fmt_time
+
+log = structlog.get_logger(__name__)
 
 router = Router(name="admin")
+
+# Running broadcasts (keep references so the tasks are not garbage-collected).
+_BROADCASTS: set[asyncio.Task[None]] = set()
 
 
 def _is_admin(user: User | None) -> bool:
@@ -120,6 +127,8 @@ async def admin_masters(query: CallbackQuery, user: User, session: AsyncSession)
         select(Master).where(Master.is_active.is_(True)).options(selectinload(Master.user))
     )
     masters = list(res.scalars().all())
+    from app.services.availability import AvailabilityService
+
     items = []
     for m in masters:
         sched = (
@@ -129,21 +138,24 @@ async def admin_masters(query: CallbackQuery, user: User, session: AsyncSession)
                 )
             )
         ).scalar_one_or_none()
-        day_off = (
-            await session.execute(
-                select(ScheduleException.id).where(
-                    ScheduleException.master_id == m.id,
-                    ScheduleException.date == today,
-                    ScheduleException.exception_type == "day_off",
+        exceptions = list(
+            (
+                await session.execute(
+                    select(ScheduleException).where(
+                        ScheduleException.master_id == m.id,
+                        ScheduleException.date == today,
+                    )
                 )
-            )
-        ).scalar_one_or_none()
-        if sched and sched.is_working_day and not day_off:
+            ).scalars()
+        )
+        start, end = AvailabilityService._effective_hours(sched, exceptions)
+        day_off = any(e.exception_type == "day_off" for e in exceptions)
+        if start is not None and end is not None and not day_off:
             appts = await AppointmentRepository(session).active_for_master_on_day(
                 m.id, today, settings.tz
             )
             items.append(
-                f"✅ {m.user.full_name} — {sched.start_time:%H:%M}–{sched.end_time:%H:%M}, "
+                f"✅ {m.user.full_name} — {start:%H:%M}–{end:%H:%M}, "
                 f"записей: {len(appts)}, ⭐ {float(m.rating)}"
             )
         else:
@@ -151,9 +163,8 @@ async def admin_masters(query: CallbackQuery, user: User, session: AsyncSession)
     if not items:
         await query.message.answer(t("admin.masters.none_today", user.language))  # type: ignore[union-attr]
     else:
-        await query.message.answer(  # type: ignore[union-attr]
-            t("admin.masters.today", user.language, items="\n".join(items))
-        )
+        for part in chunk_text(t("admin.masters.today", user.language, items="\n".join(items))):
+            await query.message.answer(part)  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -174,7 +185,8 @@ async def admin_services(query: CallbackQuery, user: User, session: AsyncSession
         f"{s.default_duration_minutes} мин (+{s.buffer_minutes} буфер)"
         for s in services
     ]
-    await query.message.answer("\n".join(lines))  # type: ignore[union-attr]
+    for part in chunk_text("\n".join(lines)):
+        await query.message.answer(part)  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -193,9 +205,8 @@ async def admin_clients(query: CallbackQuery, user: User, session: AsyncSession)
         f"{'@' + c.username if c.username else '—'}"
         for c in clients[:50]
     )
-    await query.message.answer(  # type: ignore[union-attr]
-        t("admin.clients.list", user.language, count=len(clients), items=items)
-    )
+    for part in chunk_text(t("admin.clients.list", user.language, count=len(clients), items=items)):
+        await query.message.answer(part)  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -205,7 +216,6 @@ async def admin_reviews(query: CallbackQuery, user: User, session: AsyncSession)
         await query.answer(t("admin.only", user.language), show_alert=True)
         return
     from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
 
     from app.db.models import Master, Review
 
@@ -224,10 +234,10 @@ async def admin_reviews(query: CallbackQuery, user: User, session: AsyncSession)
     for r in reviews:
         master = await session.get(Master, r.master_id)
         muser = await session.get(User, master.user_id) if master else None
-        parts.append(f"{'⭐' * r.rating} {muser.full_name if muser else '-'}\n{r.text or ''}".strip())
-    await query.message.answer(  # type: ignore[union-attr]
-        t("admin.reviews.list", user.language, items="\n\n".join(parts))
-    )
+        text = (r.text or "")[:300]
+        parts.append(f"{'⭐' * r.rating} {muser.full_name if muser else '-'}\n{text}".strip())
+    for part in chunk_text(t("admin.reviews.list", user.language, items="\n\n".join(parts))):
+        await query.message.answer(part)  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -306,10 +316,10 @@ async def admin_export(query: CallbackQuery, user: User, session: AsyncSession) 
                 a.id,
                 fmt_date(a.start_at),
                 fmt_time(a.start_at),
-                a.service.name,
-                a.master.user.full_name,
-                a.client.full_name,
-                a.client.phone,
+                csv_safe(a.service.name),
+                csv_safe(a.master.user.full_name),
+                csv_safe(a.client.full_name),
+                csv_safe(a.client.phone),
                 int(a.price),
                 a.status.value,
             ]
@@ -331,11 +341,12 @@ async def broadcast_start(query: CallbackQuery, user: User, state: FSMContext) -
     await query.answer()
 
 
-@router.message(BroadcastStates.text, F.text)
+@router.message(BroadcastStates.text, FREE_TEXT)
 async def broadcast_confirm(message: Message, user: User, session: AsyncSession, state: FSMContext) -> None:
     if not _is_admin(user):
+        await state.clear()
         return
-    clients = await UserRepository(session).all_clients()
+    clients = [c for c in await UserRepository(session).all_clients() if is_real_chat(c.telegram_id)]
     await state.update_data(text=message.text, count=len(clients))
     await state.set_state(BroadcastStates.confirm)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -352,21 +363,40 @@ async def broadcast_confirm(message: Message, user: User, session: AsyncSession,
 async def broadcast_send(
     query: CallbackQuery, user: User, session: AsyncSession, state: FSMContext, notifier: NotificationService
 ) -> None:
-    import asyncio
-
+    if not _is_admin(user):
+        await state.clear()
+        await query.answer(t("admin.only", user.language), show_alert=True)
+        return
     data = await state.get_data()
-    clients = await UserRepository(session).all_clients()
-    ok = fail = 0
-    for c in clients:
-        sent = await notifier.send_telegram(c.telegram_id, data["text"])
-        ok += int(sent)
-        fail += int(not sent)
-        await asyncio.sleep(0.05)  # rate limiting ~20 msg/s
-    await query.message.edit_text(  # type: ignore[union-attr]
-        t("admin.broadcast.done", user.language, ok=ok, fail=fail)
-    )
     await state.clear()
+    clients = [c for c in await UserRepository(session).all_clients() if is_real_chat(c.telegram_id)]
+    chat_ids = [c.telegram_id for c in clients]
+    # Answer right away: callback queries expire after a few seconds, while sending to
+    # many clients takes a while. The loop runs in the background without a DB session.
     await query.answer()
+    await query.message.edit_text(  # type: ignore[union-attr]
+        t("admin.broadcast.started", user.language, count=len(chat_ids))
+    )
+    task = asyncio.create_task(
+        _run_broadcast(notifier, chat_ids, data["text"], user.telegram_id, user.language)
+    )
+    _BROADCASTS.add(task)
+    task.add_done_callback(_BROADCASTS.discard)
+
+
+async def _run_broadcast(
+    notifier: NotificationService, chat_ids: list[int], text: str, admin_chat: int, lang: str
+) -> None:
+    ok = fail = 0
+    try:
+        for chat_id in chat_ids:
+            sent = await notifier.send_telegram(chat_id, text)
+            ok += int(sent)
+            fail += int(not sent)
+            await asyncio.sleep(0.05)  # rate limiting ~20 msg/s
+    finally:
+        log.info("broadcast.done", ok=ok, fail=fail)
+        await notifier.send_telegram(admin_chat, t("admin.broadcast.done", lang, ok=ok, fail=fail))
 
 
 @router.callback_query(BroadcastStates.confirm, ConfirmCb.filter(F.action == "cancel"))

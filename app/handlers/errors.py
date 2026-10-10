@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import structlog
 from aiogram import Router
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import ErrorEvent
 
 from app.locales import t
@@ -14,6 +15,10 @@ router = Router(name="errors")
 
 @router.errors()
 async def on_error(event: ErrorEvent) -> bool:
+    if isinstance(event.exception, TelegramForbiddenError):
+        # The user blocked the bot while we were answering: nothing to fix or report.
+        log.info("handler.user_blocked_bot", error=str(event.exception))
+        return True
     log.error("handler.exception", error=str(event.exception), exc_info=event.exception)
     update = event.update
     lang = "ru"

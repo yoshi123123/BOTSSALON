@@ -41,7 +41,8 @@ class ApptActionCb(CallbackData, prefix="appt"):
 
 class MasterApptCb(CallbackData, prefix="mappt"):
     appointment_id: int
-    action: str  # confirm | decline | contact | schedule
+    action: str  # confirm | decline
+    ts: int  # appointment start the master was shown (stale after a reschedule)
 
 
 class ReviewCb(CallbackData, prefix="rev"):

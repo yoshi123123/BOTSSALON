@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import datetime as dt
 
+from aiogram import F
 from aiogram.types import (
-    InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
@@ -12,7 +12,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config import settings
-from app.db.models import Master, Service
+from app.db.models import Appointment, Master, Service
 from app.keyboards.callbacks import (
     AdminCb,
     ApptActionCb,
@@ -28,8 +28,28 @@ from app.keyboards.callbacks import (
     SkipCb,
     TimeCb,
 )
-from app.locales import t
+from app.locales import t, variants
 from app.utils.format import fmt_short_date
+
+# Every reply-keyboard button text in every language. Free-text FSM steps (phone,
+# comment, reasons, review, broadcast) must not swallow a tap on the main menu.
+MENU_TEXTS: frozenset[str] = frozenset().union(
+    *(
+        variants(key)
+        for key in (
+            "menu.book",
+            "menu.my",
+            "menu.masters",
+            "menu.services",
+            "menu.contacts",
+            "menu.support",
+            "menu.language",
+            "admin.menu",
+            "book.share_button",
+        )
+    )
+)
+FREE_TEXT = F.text & ~F.text.in_(MENU_TEXTS)
 
 
 def main_menu(lang: str, is_admin: bool = False) -> ReplyKeyboardMarkup:
@@ -139,10 +159,11 @@ def my_appt_kb(appointment_id: int, lang: str) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def master_new_appt_kb(appointment_id: int, lang: str) -> InlineKeyboardMarkup:
+def master_new_appt_kb(appointment: Appointment, lang: str) -> InlineKeyboardMarkup:
+    ts = int(appointment.start_at.timestamp())
     b = InlineKeyboardBuilder()
-    b.button(text=t("notify.master.confirm", lang), callback_data=MasterApptCb(appointment_id=appointment_id, action="confirm"))
-    b.button(text=t("notify.master.decline", lang), callback_data=MasterApptCb(appointment_id=appointment_id, action="decline"))
+    b.button(text=t("notify.master.confirm", lang), callback_data=MasterApptCb(appointment_id=appointment.id, action="confirm", ts=ts))
+    b.button(text=t("notify.master.decline", lang), callback_data=MasterApptCb(appointment_id=appointment.id, action="decline", ts=ts))
     b.adjust(2)
     return b.as_markup()
 

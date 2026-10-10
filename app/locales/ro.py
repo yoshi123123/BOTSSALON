@@ -72,7 +72,7 @@ RO: dict[str, str] = {
         "Contactați administratorul."
     ),
     "my.cancelled": "Programarea a fost anulată.",
-    "my.rescheduled": "Programarea a fost reprogramată.",
+    "my.rescheduled": "Programarea a fost reprogramată. Maestrul va confirma noua oră.",
     "my.repeat": "🔁 Repetă ultima programare",
     # notifications
     "notify.master.new": (
@@ -175,4 +175,17 @@ RO: dict[str, str] = {
         "ℹ️ Administratorul v-a modificat programarea:\n{what}\n\n"
         "Serviciu: {service}\nMaestru: {master}\nCând: {date} la {time}"
     ),
+    # status guards, fallbacks, phone validation
+    "appt.not_active": "Această programare nu mai este activă (anulată sau finalizată).",
+    "appt.status_now": "Programarea are deja statutul: {status}.",
+    "error.stale": "Acest buton nu mai este valabil. Începeți din nou din meniul principal (/start).",
+    "fallback.unknown": "Nu am înțeles mesajul. Alegeți o acțiune din meniu:",
+    "fallback.use_buttons": "Vă rugăm să folosiți butoanele de mai sus. Pentru a începe din nou, apăsați /start.",
+    "book.bad_phone": "Nu pare a fi un număr de telefon. Introduceți numărul, de ex. +373 60 123 456, sau apăsați «📱 Partajează contactul».",
+    "book.contact_saved": "Contact salvat ✅",
+    "review.not_completed": "Recenzia poate fi lăsată doar după o vizită finalizată.",
+    "admin.broadcast.started": "Difuzarea a pornit pentru {count} clienți. Vă anunț când se termină.",
+    "my.reschedule_too_late": "Puteți reprograma singur cel târziu cu {hours} ore înainte. Contactați administratorul.",
+    "notify.master.rescheduled": "🔄 Clientul a mutat programarea — confirmați noua oră.\n\nClient: {client}\nTelefon: {phone}\nServiciu: {service}\nA fost: {old}\nAcum: {date} la {time}",
+    "appt.moved": "Ora programării s-a schimbat deja — acum: {date} la {time}. Folosiți ultima notificare.",
 }

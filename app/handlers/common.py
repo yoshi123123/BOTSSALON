@@ -7,13 +7,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import SUPPORTED_LANGUAGES, settings
 from app.db.models import User
 from app.keyboards.builders import lang_kb, main_menu
 from app.keyboards.callbacks import LangCb
 from app.locales import t
 from app.repositories.catalog import ServiceRepository
 from app.repositories.users import SalonRepository, UserRepository
+from app.utils.format import chunk_text
 
 router = Router(name="common")
 
@@ -30,12 +31,10 @@ async def cmd_start(
     is_admin: bool,
     session: AsyncSession,
     state: FSMContext,
-    redis,
 ) -> None:
     await state.clear()
     # First contact: offer a language choice once.
-    lang_flag = f"lang_chosen:{user.telegram_id}"
-    if not await redis.get(lang_flag):
+    if not user.language_selected:
         await message.answer(t("onboarding.choose_lang", user.language), reply_markup=lang_kb())
         return
     name = await _salon_name(session)
@@ -57,10 +56,13 @@ async def set_language(
     user: User,
     is_admin: bool,
     session: AsyncSession,
-    redis,
 ) -> None:
+    if callback_data.code not in SUPPORTED_LANGUAGES:
+        await query.answer()
+        return
     await UserRepository(session).set_language(user, callback_data.code)
-    await redis.set(f"lang_chosen:{user.telegram_id}", "1")
+    user.language_selected = True
+    await session.flush()
     name = await _salon_name(session)
     await query.message.answer(  # type: ignore[union-attr]
         t("lang.set", callback_data.code)
@@ -98,7 +100,8 @@ async def services_list(message: Message, user: User, session: AsyncSession) -> 
         f"{s.default_duration_minutes} мин"
         for s in services
     ]
-    await message.answer("\n".join(lines))
+    for part in chunk_text("\n".join(lines)):
+        await message.answer(part)
 
 
 @router.message(F.text.in_({t("menu.masters", "ru"), t("menu.masters", "ro"), t("menu.masters", "en")}))

@@ -1,4 +1,4 @@
-"""Middleware injecting shared singletons (redis, notifier) into handler data."""
+"""Middleware injecting shared singletons (notifier) into handler data."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -6,14 +6,12 @@ from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
-from redis.asyncio import Redis
 
 from app.services.notifications import NotificationService
 
 
 class DepsMiddleware(BaseMiddleware):
-    def __init__(self, redis: Redis, notifier: NotificationService) -> None:
-        self.redis = redis
+    def __init__(self, notifier: NotificationService) -> None:
         self.notifier = notifier
 
     async def __call__(
@@ -22,6 +20,5 @@ class DepsMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        data["redis"] = self.redis
         data["notifier"] = self.notifier
         return await handler(event, data)

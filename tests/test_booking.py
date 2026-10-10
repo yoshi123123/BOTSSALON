@@ -75,9 +75,58 @@ async def test_reschedule(session, seeded):
     from app.repositories.appointments import AppointmentRepository
     full = await AppointmentRepository(session).get(appt.id)
     new_slot = _future_slot(15)
-    await booking.reschedule(full, seeded["client"], new_slot)
+    await booking.reschedule(full, seeded["client"], new_slot, by_client=True)
     assert full.start_at == new_slot
+    # A time picked by the client goes back to the master for confirmation.
+    assert full.status == AppointmentStatus.pending
+
+
+@pytest.mark.asyncio
+async def test_reschedule_by_admin_is_confirmed(session, seeded):
+    from app.db.models import Role, User
+    from app.repositories.appointments import AppointmentRepository
+
+    admin = User(telegram_id=3000, role=Role.admin, full_name="Админ")
+    session.add(admin)
+    await session.flush()
+    booking = BookingService(session)
+    appt = await booking.create(
+        client=seeded["client"], master=seeded["master"], service=seeded["service"],
+        start_at=_future_slot(11), client_comment=None,
+    )
+    full = await AppointmentRepository(session).get(appt.id)
+    await booking.reschedule(full, admin, _future_slot(16), by_client=False)
     assert full.status == AppointmentStatus.confirmed
+
+
+@pytest.mark.asyncio
+async def test_client_reschedule_too_late(session, seeded):
+    from app.repositories.appointments import AppointmentRepository
+
+    booking = BookingService(session)
+    soon = dt.datetime.now(settings.tz) + dt.timedelta(hours=1)
+    appt = await booking.create(
+        client=seeded["client"], master=seeded["master"], service=seeded["service"],
+        start_at=soon, client_comment=None,
+    )
+    full = await AppointmentRepository(session).get(appt.id)
+    with pytest.raises(TooLateError):
+        await booking.reschedule(full, seeded["client"], _future_slot(15), by_client=True)
+
+
+@pytest.mark.asyncio
+async def test_cannot_book_master_without_service(session, seeded):
+    from app.db.models import Service
+    from app.services.booking import UnavailableError
+
+    other = Service(name="Не оказывается", default_price=1, default_duration_minutes=30)
+    session.add(other)
+    await session.flush()
+    with pytest.raises(UnavailableError):
+        await BookingService(session).create(
+            client=seeded["client"], master=seeded["master"], service=other,
+            start_at=_future_slot(11), client_comment=None,
+        )
 
 
 @pytest.mark.asyncio

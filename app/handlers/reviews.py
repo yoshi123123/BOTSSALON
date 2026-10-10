@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AppointmentStatus, User
-from app.keyboards.builders import review_text_skip_kb
+from app.keyboards.builders import FREE_TEXT, review_text_skip_kb
 from app.keyboards.callbacks import ReviewCb, SkipCb
 from app.locales import t
 from app.repositories.appointments import AppointmentRepository, ReviewRepository
@@ -25,7 +25,10 @@ async def rate(
         await query.answer(t("error.not_owner", user.language), show_alert=True)
         return
     if appt.status != AppointmentStatus.completed:
-        await query.answer(t("review.already", user.language), show_alert=True)
+        await query.answer(t("review.not_completed", user.language), show_alert=True)
+        return
+    if not 1 <= callback_data.rating <= 5:
+        await query.answer()
         return
     review_repo = ReviewRepository(session)
     if await review_repo.exists_for_appointment(appt.id):
@@ -37,9 +40,12 @@ async def rate(
     await query.answer()
 
 
-@router.message(ReviewStates.text, F.text)
+MAX_REVIEW_LEN = 1000
+
+
+@router.message(ReviewStates.text, FREE_TEXT)
 async def review_text(message: Message, user: User, session: AsyncSession, state: FSMContext) -> None:
-    await _save_review(message, user, session, state, message.text.strip())
+    await _save_review(message, user, session, state, (message.text or "").strip()[:MAX_REVIEW_LEN])
 
 
 @router.callback_query(ReviewStates.text, SkipCb.filter(F.what == "review"))

@@ -7,13 +7,17 @@ which is the primary application-level protection.
 from __future__ import annotations
 
 import datetime as dt
+import os
 
-import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+# Settings are read at import time; tests must not need a real .env / Postgres.
+os.environ.setdefault("BOT_TOKEN", "123456:TEST-TOKEN")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
-from app.db.base import Base
-from app.db.models import (
+import pytest_asyncio  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+
+from app.db.base import Base  # noqa: E402
+from app.db.models import (  # noqa: E402
     Master,
     MasterService,
     Role,

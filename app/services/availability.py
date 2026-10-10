@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import datetime as dt
 
-from redis.asyncio import Redis
-
 from app.config import settings
 from app.db.models import Master, Schedule, ScheduleException, Service
 from app.repositories.appointments import AppointmentRepository
 from app.repositories.catalog import MasterRepository
 from app.services.slot_hold import SlotHoldService
+from app.utils.format import to_local
 
 SLOT_STEP_MINUTES = 30  # granularity of offered start times
 
@@ -23,11 +22,10 @@ class AvailabilityService:
         self,
         master_repo: MasterRepository,
         appt_repo: AppointmentRepository,
-        redis: Redis | None = None,
     ) -> None:
         self.master_repo = master_repo
         self.appt_repo = appt_repo
-        self.holds = SlotHoldService(redis) if redis is not None else None
+        self.holds = SlotHoldService()
 
     async def free_slots(
         self,
@@ -43,20 +41,18 @@ class AvailabilityService:
         total = duration + buffer
 
         schedule = await self.master_repo.schedule_for_weekday(master.id, day.weekday())
-        if schedule is None or not schedule.is_working_day:
-            return []
-
         exceptions = await self.master_repo.exceptions_for_date(master.id, day)
         if any(e.exception_type == "day_off" for e in exceptions):
             return []
 
+        # A custom_hours exception can also open a normally non-working day.
         work_start, work_end = self._effective_hours(schedule, exceptions)
         if work_start is None or work_end is None:
             return []
 
         existing = await self.appt_repo.active_for_master_on_day(master.id, day, tz)
         busy: list[tuple[dt.datetime, dt.datetime]] = [
-            (a.start_at.astimezone(tz), a.end_at.astimezone(tz)) for a in existing
+            (to_local(a.start_at), to_local(a.end_at)) for a in existing
         ]
         for e in exceptions:
             if e.exception_type == "block" and e.start_time and e.end_time:
@@ -66,7 +62,7 @@ class AvailabilityService:
                         dt.datetime.combine(day, e.end_time, tzinfo=tz),
                     )
                 )
-        if schedule.break_start and schedule.break_end:
+        if schedule is not None and schedule.break_start and schedule.break_end:
             busy.append(
                 (
                     dt.datetime.combine(day, schedule.break_start, tzinfo=tz),
@@ -89,13 +85,33 @@ class AvailabilityService:
             if slot_end > day_end + dt.timedelta(minutes=buffer):
                 break
             if not self._overlaps_any(cursor, slot_end, busy):
-                if self.holds is not None and holder_id is not None:
-                    if await self.holds.is_held_by_other(master.id, cursor, holder_id):
-                        cursor += step
-                        continue
+                if holder_id is not None and await self.holds.is_held_by_other(
+                    master.id, cursor, holder_id, end_at=slot_end
+                ):
+                    cursor += step
+                    continue
                 slots.append(cursor)
             cursor += step
         return slots
+
+    async def slot_end(self, master: Master, service: Service, start_at: dt.datetime) -> dt.datetime:
+        """End of the time block (duration + buffer) a booking at `start_at` occupies."""
+        ms = await self.master_repo.master_service(master.id, service.id)
+        duration = self.master_repo.effective_duration(ms, service)
+        return start_at + dt.timedelta(minutes=duration + service.buffer_minutes)
+
+    async def is_bookable(
+        self,
+        master: Master,
+        service: Service,
+        start_at: dt.datetime,
+        holder_id: int | None = None,
+    ) -> bool:
+        """True if `start_at` is one of the slots we would offer (callback data comes
+        from the client and must not be trusted)."""
+        day = start_at.astimezone(settings.tz).date()
+        slots = await self.free_slots(master, service, day, holder_id=holder_id)
+        return any(s == start_at for s in slots)
 
     async def has_any_slot(self, master: Master, service: Service, day: dt.date) -> bool:
         return len(await self.free_slots(master, service, day)) > 0
@@ -113,11 +129,13 @@ class AvailabilityService:
 
     @staticmethod
     def _effective_hours(
-        schedule: Schedule, exceptions: list[ScheduleException]
+        schedule: Schedule | None, exceptions: list[ScheduleException]
     ) -> tuple[dt.time | None, dt.time | None]:
         for e in exceptions:
             if e.exception_type == "custom_hours" and e.start_time and e.end_time:
                 return e.start_time, e.end_time
+        if schedule is None or not schedule.is_working_day:
+            return None, None
         return schedule.start_time, schedule.end_time
 
     @staticmethod

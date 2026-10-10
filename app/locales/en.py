@@ -72,7 +72,7 @@ EN: dict[str, str] = {
         "Please contact the administrator."
     ),
     "my.cancelled": "The appointment has been cancelled.",
-    "my.rescheduled": "The appointment has been rescheduled.",
+    "my.rescheduled": "The appointment has been rescheduled. The master will confirm the new time.",
     "my.repeat": "🔁 Repeat last booking",
     # notifications
     "notify.master.new": (
@@ -175,4 +175,17 @@ EN: dict[str, str] = {
         "ℹ️ The administrator changed your booking:\n{what}\n\n"
         "Service: {service}\nMaster: {master}\nWhen: {date} at {time}"
     ),
+    # status guards, fallbacks, phone validation
+    "appt.not_active": "This appointment is no longer active (cancelled or completed).",
+    "appt.status_now": "The appointment already has status: {status}.",
+    "error.stale": "This button has expired. Please start again from the main menu (/start).",
+    "fallback.unknown": "Sorry, I didn't get that. Please choose an action from the menu:",
+    "fallback.use_buttons": "Please use the buttons above. To start over, send /start.",
+    "book.bad_phone": "That doesn't look like a phone number. Enter a number like +373 60 123 456 or tap “📱 Share contact”.",
+    "book.contact_saved": "Contact saved ✅",
+    "review.not_completed": "You can leave a review only after a completed visit.",
+    "admin.broadcast.started": "Broadcast started for {count} clients. I'll report when it's done.",
+    "my.reschedule_too_late": "You can reschedule yourself no later than {hours} h before. Please contact the administrator.",
+    "notify.master.rescheduled": "🔄 The client moved the booking — please confirm the new time.\n\nClient: {client}\nPhone: {phone}\nService: {service}\nWas: {old}\nNow: {date} at {time}",
+    "appt.moved": "The booking time has changed — now: {date} at {time}. Please use the latest notification.",
 }

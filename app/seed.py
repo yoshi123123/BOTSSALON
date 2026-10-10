@@ -35,7 +35,11 @@ DEMO_MARKER_TG_ID = 1  # existence of this user == seed already applied
 
 
 async def _already_seeded(session: AsyncSession) -> bool:
+    """Skip when demo data was applied before, or the owner already has a real catalog."""
     res = await session.execute(select(User.id).where(User.telegram_id == DEMO_MARKER_TG_ID))
+    if res.scalar_one_or_none() is not None:
+        return True
+    res = await session.execute(select(Service.id).limit(1))
     return res.scalar_one_or_none() is not None
 
 
@@ -49,9 +53,9 @@ async def seed_demo(session: AsyncSession) -> bool:
     if salon is None:
         session.add(
             SalonSettings(
-                name="Салон «Пример»",
-                address="Кишинёв, бул. Дачия 25",
-                phone="+373 60 000 000",
+                name=settings.salon_name,
+                address=settings.salon_address or None,
+                phone=settings.salon_phone or None,
                 timezone=settings.timezone,
                 currency=settings.currency,
             )
@@ -168,9 +172,70 @@ async def seed_demo(session: AsyncSession) -> bool:
     return True
 
 
+async def sync_salon_settings(session: AsyncSession) -> None:
+    """Apply SALON_* / TIMEZONE / CURRENCY env vars that are explicitly set to the stored
+    salon settings, so changing them in Railway Variables takes effect on redeploy."""
+    salon = (await session.execute(select(SalonSettings).limit(1))).scalar_one_or_none()
+    if salon is None:
+        return  # handlers fall back to the env values
+    explicit = settings.model_fields_set
+    mapping = {
+        "salon_name": "name",
+        "salon_address": "address",
+        "salon_phone": "phone",
+        "timezone": "timezone",
+        "currency": "currency",
+    }
+    for field, column in mapping.items():
+        if field in explicit:
+            value = getattr(settings, field) or None
+            if column in {"name", "timezone", "currency"} and value is None:
+                continue  # NOT NULL columns
+            setattr(salon, column, value)
+    await session.flush()
+
+
+async def bind_master_telegram_id(session: AsyncSession) -> bool:
+    """MASTER_TELEGRAM_ID: attach a real Telegram account to the first demo master so that
+    new-booking notifications (with Confirm/Decline buttons) reach a real person.
+    Idempotent and safe to run on every start (also when the variable is set later)."""
+    tg_id = settings.master_telegram_id
+    if not tg_id:
+        return False
+    demo_master = (
+        await session.execute(
+            select(Master).join(User, User.id == Master.user_id)
+            .where(User.telegram_id == DEMO_MARKER_TG_ID)
+        )
+    ).scalar_one_or_none()
+    if demo_master is None:
+        return False  # no demo master left (already bound or demo data removed)
+    real = (
+        await session.execute(select(User).where(User.telegram_id == tg_id))
+    ).scalar_one_or_none()
+    if real is None:
+        demo_user = await session.get(User, demo_master.user_id)
+        real = User(telegram_id=tg_id, full_name=demo_user.full_name if demo_user else None,
+                    language="ru", language_selected=False)
+        session.add(real)
+        await session.flush()
+    already_master = (
+        await session.execute(select(Master.id).where(Master.user_id == real.id))
+    ).scalar_one_or_none()
+    if already_master is not None:
+        return False
+    if real.role == Role.client:
+        real.role = Role.master
+    demo_master.user_id = real.id
+    await session.flush()
+    return True
+
+
 async def main() -> None:
     async with async_session_factory() as session:
         created = await seed_demo(session)
+        await bind_master_telegram_id(session)
+        await sync_salon_settings(session)
         await session.commit()
         print("Seed:", "created demo data" if created else "already present, skipped")
 

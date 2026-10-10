@@ -9,20 +9,17 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from redis.asyncio import Redis
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.db.models import Appointment, AppointmentStatus, Master, Role, User
-from app.keyboards.builders import dates_kb, times_kb
+from app.db.models import ACTIVE_STATUSES, Appointment, AppointmentStatus, Role, User
+from app.keyboards.builders import dates_kb, master_new_appt_kb, times_kb
 from app.keyboards.callbacks import AdminApptCb, AdminPickCb, DateCb, TimeCb
 from app.locales import t
 from app.repositories.appointments import AppointmentRepository
 from app.repositories.catalog import MasterRepository
 from app.services.availability import AvailabilityService
-from app.services.booking import BookingService, SlotTakenError
+from app.services.booking import BookingService, NotActiveError, SlotTakenError
 from app.services.notifications import NotificationService
 from app.states import AdminEditStates
 from app.utils.format import fmt_date, fmt_time
@@ -59,7 +56,7 @@ async def _card_text(appt: Appointment, lang: str) -> str:
         id=appt.id,
         service=appt.service.name,
         master=appt.master.user.full_name or "-",
-        date=fmt_date(appt.start_at),
+        date=fmt_date(appt.start_at, lang),
         time=fmt_time(appt.start_at),
         status=t(f"status.{appt.status.value}", lang),
         price=int(appt.price),
@@ -77,6 +74,7 @@ async def _notify_change(
     what_admin: str,
     what_client: str,
     by: str,
+    notify_master: bool = True,
 ) -> None:
     """Notify all admins + the client + the master about a change."""
     await notifier.notify_admins(
@@ -94,22 +92,21 @@ async def _notify_change(
             time=fmt_time(appt.start_at),
         )
     )
-    if appt.client.telegram_id > 1000:  # skip demo clients
-        await notifier.notify_client(
-            appt.client.telegram_id,
-            t(
-                "notify.client.admin_changed",
-                appt.client.language,
-                what=what_client,
-                service=appt.service.name,
-                master=appt.master.user.full_name or "-",
-                date=fmt_date(appt.start_at),
-                time=fmt_time(appt.start_at),
-            ),
-        )
-    if appt.master.telegram_notifications_enabled and appt.master.user.telegram_id > 1000:
-        await notifier.notify_client(
-            appt.master.user.telegram_id,
+    await notifier.notify_client(
+        appt.client.telegram_id,
+        t(
+            "notify.client.admin_changed",
+            appt.client.language,
+            what=what_client,
+            service=appt.service.name,
+            master=appt.master.user.full_name or "-",
+            date=fmt_date(appt.start_at, appt.client.language),
+            time=fmt_time(appt.start_at),
+        ),
+    )
+    if notify_master:
+        await notifier.notify_master(
+            appt.master,
             f"🛠 #{appt.id}: {what_admin} — {fmt_date(appt.start_at)} {fmt_time(appt.start_at)}",
         )
 
@@ -140,7 +137,6 @@ async def start_reschedule(
     user: User,
     session: AsyncSession,
     state: FSMContext,
-    redis: Redis,
 ) -> None:
     if not _is_admin(user):
         await query.answer(t("admin.only", user.language), show_alert=True)
@@ -149,8 +145,11 @@ async def start_reschedule(
     if appt is None:
         await query.answer()
         return
+    if appt.status not in ACTIVE_STATUSES:
+        await query.answer(t("appt.not_active", user.language), show_alert=True)
+        return
     availability = AvailabilityService(
-        MasterRepository(session), AppointmentRepository(session), redis
+        MasterRepository(session), AppointmentRepository(session)
     )
     today = dt.datetime.now(settings.tz).date()
     days: list[dt.date] = []
@@ -178,16 +177,23 @@ async def pick_date(
     user: User,
     session: AsyncSession,
     state: FSMContext,
-    redis: Redis,
 ) -> None:
+    if not _is_admin(user):
+        await state.clear()
+        await query.answer(t("admin.only", user.language), show_alert=True)
+        return
     data = await state.get_data()
     appt = await AppointmentRepository(session).get(data["appointment_id"])
     if appt is None:
         await query.answer()
         return
-    day = dt.date.fromisoformat(callback_data.iso)
+    try:
+        day = dt.date.fromisoformat(callback_data.iso)
+    except ValueError:
+        await query.answer()
+        return
     availability = AvailabilityService(
-        MasterRepository(session), AppointmentRepository(session), redis
+        MasterRepository(session), AppointmentRepository(session)
     )
     slots = await availability.free_slots(appt.master, appt.service, day)
     if not slots:
@@ -209,6 +215,10 @@ async def pick_time(
     state: FSMContext,
     notifier: NotificationService,
 ) -> None:
+    if not _is_admin(user):
+        await state.clear()
+        await query.answer(t("admin.only", user.language), show_alert=True)
+        return
     data = await state.get_data()
     appt = await AppointmentRepository(session).get(data["appointment_id"])
     if appt is None:
@@ -218,11 +228,15 @@ async def pick_time(
     old = f"{fmt_date(appt.start_at)} {fmt_time(appt.start_at)}"
     new_start = dt.datetime.fromtimestamp(callback_data.ts, tz=settings.tz)
     try:
-        await BookingService(session).reschedule(appt, user, new_start)
+        await BookingService(session).reschedule(appt, user, new_start, by_client=False)
+    except NotActiveError:
+        await state.clear()
+        await query.answer(t("appt.not_active", user.language), show_alert=True)
+        return
     except SlotTakenError:
         await query.answer(t("book.slot_taken", user.language), show_alert=True)
         return
-    await session.flush()
+    await session.commit()
     what = f"Перенос: {old} → {fmt_date(new_start)} {fmt_time(new_start)}"
     await _notify_change(notifier, appt, what, what, by="админ")
     await query.message.edit_text(t("aedit.done", user.language))  # type: ignore[union-attr]
@@ -275,24 +289,31 @@ async def set_master(
         await query.answer()
         return
     ms = await MasterRepository(session).master_service(new_master.id, appt.service_id)
-    if ms is None or not ms.is_active:
+    if ms is None or not ms.is_active or not new_master.is_active:
         await query.answer(t("aedit.master_cant", user.language), show_alert=True)
         return
-    # Ensure the target master is free at this time.
-    repo = AppointmentRepository(session)
-    overlapping = await repo.overlapping_active(new_master.id, appt.start_at, appt.end_at)
-    if overlapping:
+    old_master = appt.master
+    old_name = old_master.user.full_name or "-"
+    try:
+        await BookingService(session).change_master(appt, new_master, user)
+    except NotActiveError:
+        await query.answer(t("appt.not_active", user.language), show_alert=True)
+        return
+    except SlotTakenError:
         await query.answer(t("book.slot_taken", user.language), show_alert=True)
         return
-    old_name = appt.master.user.full_name or "-"
-    appt.master_id = new_master.id
-    await repo.add_history(appt.id, user.id, "master_changed", old_name,
-                           new_master.user.full_name or "-")
-    await session.flush()
-    # reload relationships
-    appt = await repo.get(appt.id)
+    await session.commit()
     what = f"Смена мастера: {old_name} → {new_master.user.full_name}"
-    await _notify_change(notifier, appt, what, what, by="админ")
+    pending = appt.status == AppointmentStatus.pending
+    await _notify_change(notifier, appt, what, what, by="админ", notify_master=not pending)
+    if pending:
+        # The new master has to confirm the booking: send the card with the buttons.
+        await notifier.notify_master_new(appt, master_new_appt_kb(appt, appt.master.user.language))
+    if old_master.id != new_master.id:
+        await notifier.notify_master(
+            old_master,
+            f"🛠 #{appt.id}: {what} — {fmt_date(appt.start_at)} {fmt_time(appt.start_at)}",
+        )
     await query.message.edit_text(t("aedit.done", user.language))  # type: ignore[union-attr]
     await query.answer()
 
@@ -343,10 +364,21 @@ async def set_status(
     if appt is None:
         await query.answer()
         return
-    new_status = AppointmentStatus(callback_data.value)
+    try:
+        new_status = AppointmentStatus(callback_data.value)
+    except ValueError:
+        await query.answer()
+        return
+    if new_status == appt.status:
+        await query.answer(t("aedit.done", user.language))
+        return
     old = t(f"status.{appt.status.value}", user.language)
-    await BookingService(session).set_status(appt, new_status, user)
-    await session.flush()
+    try:
+        await BookingService(session).set_status(appt, new_status, user)
+    except SlotTakenError:
+        await query.answer(t("book.slot_taken", user.language), show_alert=True)
+        return
+    await session.commit()
     what = f"Статус: {old} → {t(f'status.{new_status.value}', user.language)}"
     await _notify_change(notifier, appt, what, what, by="админ")
     await query.message.edit_text(t("aedit.done", user.language))  # type: ignore[union-attr]
@@ -369,10 +401,18 @@ async def cancel_appt(
     if appt is None:
         await query.answer()
         return
-    await BookingService(session).set_status(
-        appt, AppointmentStatus.cancelled_by_admin, user, "отменено администратором"
-    )
-    await session.flush()
+    try:
+        await BookingService(session).set_status(
+            appt,
+            AppointmentStatus.cancelled_by_admin,
+            user,
+            "отменено администратором",
+            allowed_from=ACTIVE_STATUSES,
+        )
+    except (NotActiveError, SlotTakenError):
+        await query.answer(t("appt.not_active", user.language), show_alert=True)
+        return
+    await session.commit()
     what = t("aedit.cancelled", user.language)
     await _notify_change(notifier, appt, what, what, by="админ")
     await query.message.edit_text(t("aedit.cancelled", user.language))  # type: ignore[union-attr]

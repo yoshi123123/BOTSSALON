@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 
-import fakeredis.aioredis
 import pytest
 
 from app.config import settings
@@ -63,8 +62,7 @@ async def test_matching_returns_master(session, seeded):
 
 @pytest.mark.asyncio
 async def test_slot_hold_prevents_other():
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    holds = SlotHoldService(redis)
+    holds = SlotHoldService()
     slot = _future_slot(11)
     assert await holds.try_hold(1, slot, holder_id=100) is True
     # Another holder cannot grab it.
@@ -74,7 +72,6 @@ async def test_slot_hold_prevents_other():
     assert await holds.try_hold(1, slot, holder_id=100) is True
     await holds.release(1, slot, holder_id=100)
     assert await holds.try_hold(1, slot, holder_id=200) is True
-    await redis.aclose()
 
 
 @pytest.mark.asyncio
@@ -85,3 +82,22 @@ async def test_admin_rights_check(session, seeded):
     assert _is_admin(client) is False
     client.role = Role.admin
     assert _is_admin(client) is True
+
+
+@pytest.mark.asyncio
+async def test_slot_hold_blocks_overlapping_slots():
+    holds = SlotHoldService()
+    start = _future_slot(15)
+    end = start + dt.timedelta(minutes=60)
+    assert await holds.try_hold(42, start, holder_id=1, end_at=end) is True
+    half = start + dt.timedelta(minutes=30)
+    # Another client cannot hold a slot overlapping the held 15:00-16:00 block...
+    assert await holds.is_held_by_other(42, half, 2, end_at=half + dt.timedelta(minutes=60))
+    assert await holds.try_hold(42, half, holder_id=2, end_at=half + dt.timedelta(minutes=60)) is False
+    # ...but the adjacent 16:00 slot and other masters are fine.
+    assert await holds.try_hold(42, end, holder_id=2, end_at=end + dt.timedelta(minutes=60)) is True
+    assert await holds.try_hold(43, start, holder_id=2, end_at=end) is True
+    # Picking another time replaces the client's previous hold for that master.
+    later = start + dt.timedelta(hours=3)
+    assert await holds.try_hold(42, later, holder_id=1, end_at=later + dt.timedelta(minutes=60))
+    assert await holds.owns(42, start, 1) is False

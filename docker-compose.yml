@@ -15,49 +15,17 @@ services:
     ports:
       - "5432:5432"
 
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    ports:
-      - "6379:6379"
-
-  migrate:
-    build: .
-    command: alembic upgrade head
-    env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
-
+  # The bot applies migrations and seeds demo data itself on start-up.
   bot:
     build: .
     command: python -m app.main
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://salon:salon@db:5432/salon
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  worker:
-    build: .
-    command: arq app.background.worker.WorkerSettings
-    env_file: .env
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   pgdata:

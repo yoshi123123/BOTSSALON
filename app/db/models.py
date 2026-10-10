@@ -19,6 +19,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,6 +62,7 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(32))
     username: Mapped[str | None] = mapped_column(String(64))
     language: Mapped[str] = mapped_column(String(4), default="ru")
+    language_selected: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -69,7 +71,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    master: Mapped["Master | None"] = relationship(back_populates="user", uselist=False)
+    master: Mapped[Master | None] = relationship(back_populates="user", uselist=False)
 
 
 class Master(Base):
@@ -88,9 +90,9 @@ class Master(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user: Mapped[User] = relationship(back_populates="master")
-    services: Mapped[list["MasterService"]] = relationship(back_populates="master")
-    schedules: Mapped[list["Schedule"]] = relationship(back_populates="master")
-    portfolio: Mapped[list["PortfolioItem"]] = relationship(back_populates="master")
+    services: Mapped[list[MasterService]] = relationship(back_populates="master")
+    schedules: Mapped[list[Schedule]] = relationship(back_populates="master")
+    portfolio: Mapped[list[PortfolioItem]] = relationship(back_populates="master")
 
 
 class ServiceCategory(Base):
@@ -166,7 +168,8 @@ class Appointment(Base):
             "master_id",
             "start_at",
             unique=True,
-            postgresql_where="status IN ('pending','confirmed')",
+            postgresql_where=text("status IN ('pending','confirmed')"),
+            sqlite_where=text("status IN ('pending','confirmed')"),  # tests run on SQLite
         ),
         Index("ix_appt_master_time", "master_id", "start_at", "end_at"),
         Index("ix_appt_client", "client_id"),
@@ -271,3 +274,14 @@ class SalonSettings(Base):
     cancellation_policy: Mapped[str | None] = mapped_column(Text)
     greeting_text: Mapped[str | None] = mapped_column(Text)
     sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class SentNotification(Base):
+    """Idempotency marks for background jobs (reminders, digests, review asks)."""
+
+    __tablename__ = "sent_notifications"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
