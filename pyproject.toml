@@ -15,6 +15,7 @@ dependencies = [
     "twilio>=9.0",
     "structlog>=24.1",
     "greenlet",
+    "psycopg[binary]",
 ]
 
 [project.optional-dependencies]
