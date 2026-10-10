@@ -21,8 +21,31 @@ from app.services.notifications import NotificationService
 log = structlog.get_logger(__name__)
 
 
+def _run_migrations_sync() -> None:
+    """Apply Alembic migrations. Runs in a worker thread because alembic's
+    async env.py calls asyncio.run(), which is illegal inside a running loop."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    root = Path(__file__).resolve().parent.parent  # project root (contains alembic.ini)
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    command.upgrade(cfg, "head")
+
+
 async def main() -> None:
     setup_logging()
+
+    # Auto-apply DB migrations on every boot (no-op when already up to date),
+    # so the bot works with a plain `python -m app.main` start command.
+    try:
+        await asyncio.to_thread(_run_migrations_sync)
+        log.info("migrations.applied")
+    except Exception as exc:  # noqa: BLE001 - surface the reason, then fail fast
+        log.error("migrations.failed", error=str(exc))
+        raise
 
     # Auto-apply demo data on first boot (idempotent, skips if present).
     from app.db.base import async_session_factory

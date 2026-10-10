@@ -150,4 +150,29 @@ RO: dict[str, str] = {
     ),
     # onboarding
     "onboarding.choose_lang": "Выберите язык / Alegeți limba / Choose language:",
+    # admin appointment editing
+    "aedit.card": (
+        "📌 Programare #{id}\n\nServiciu: {service}\nMaestru: {master}\n"
+        "Data: {date} la {time}\nStatus: {status}\nPreț: {price} {currency}\n\n"
+        "Client: {client}\nTelefon: {phone}\nUsername: {username}\n"
+        "Comentariu: {comment}"
+    ),
+    "aedit.reschedule": "🔄 Reprogramează",
+    "aedit.master": "💇 Schimbă maestrul",
+    "aedit.status": "🚦 Schimbă statusul",
+    "aedit.cancel": "❌ Anulează programarea",
+    "aedit.pick_master": "Alegeți noul maestru:",
+    "aedit.pick_status": "Alegeți noul status:",
+    "aedit.done": "✅ Programarea a fost actualizată.",
+    "aedit.cancelled": "❌ Programarea a fost anulată de administrator.",
+    "aedit.master_cant": "Acest maestru nu prestează acest serviciu.",
+    "notify.admin.change": (
+        "🛠 Modificare programare #{id} ({by})\n{what}\n\n"
+        "Client: {client} {phone}\nServiciu: {service}\nMaestru: {master}\n"
+        "Când: {date} {time}"
+    ),
+    "notify.client.admin_changed": (
+        "ℹ️ Administratorul v-a modificat programarea:\n{what}\n\n"
+        "Serviciu: {service}\nMaestru: {master}\nCând: {date} la {time}"
+    ),
 }

@@ -150,4 +150,29 @@ RU: dict[str, str] = {
     ),
     # onboarding
     "onboarding.choose_lang": "Выберите язык / Alegeți limba / Choose language:",
+    # admin appointment editing
+    "aedit.card": (
+        "📌 Запись #{id}\n\nУслуга: {service}\nМастер: {master}\n"
+        "Дата: {date} в {time}\nСтатус: {status}\nЦена: {price} {currency}\n\n"
+        "Клиент: {client}\nТелефон: {phone}\nUsername: {username}\n"
+        "Комментарий: {comment}"
+    ),
+    "aedit.reschedule": "🔄 Перенести",
+    "aedit.master": "💇 Сменить мастера",
+    "aedit.status": "🚦 Сменить статус",
+    "aedit.cancel": "❌ Отменить запись",
+    "aedit.pick_master": "Выберите нового мастера:",
+    "aedit.pick_status": "Выберите новый статус:",
+    "aedit.done": "✅ Запись обновлена.",
+    "aedit.cancelled": "❌ Запись отменена администратором.",
+    "aedit.master_cant": "Этот мастер не выполняет данную услугу.",
+    "notify.admin.change": (
+        "🛠 Изменение записи #{id} ({by})\n{what}\n\n"
+        "Клиент: {client} {phone}\nУслуга: {service}\nМастер: {master}\n"
+        "Когда: {date} {time}"
+    ),
+    "notify.client.admin_changed": (
+        "ℹ️ Администратор изменил вашу запись:\n{what}\n\n"
+        "Услуга: {service}\nМастер: {master}\nКогда: {date} в {time}"
+    ),
 }

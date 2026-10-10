@@ -95,6 +95,13 @@ async def do_cancel(
             appt.master.user.telegram_id,
             f"❌ Запись отменена клиентом: {fmt_date(appt.start_at)} {fmt_time(appt.start_at)}",
         )
+    await notifier.notify_admins(
+        f"🛠 Запись #{appt.id} отменена клиентом\n"
+        f"Клиент: {appt.client.full_name or '-'} {appt.client.phone or '-'}\n"
+        f"Услуга: {appt.service.name} · Мастер: {appt.master.user.full_name}\n"
+        f"Было: {fmt_date(appt.start_at)} {fmt_time(appt.start_at)}\n"
+        f"Причина: {message.text.strip()}"
+    )
     await message.answer(t("my.cancelled", user.language))
     await state.clear()
 
@@ -185,6 +192,12 @@ async def reschedule_pick_time(
             appt.master.user.telegram_id,
             f"🔄 Запись перенесена: {fmt_date(new_start)} {fmt_time(new_start)}",
         )
+    await notifier.notify_admins(
+        f"🛠 Запись #{appt.id} перенесена клиентом\n"
+        f"Клиент: {appt.client.full_name or '-'} {appt.client.phone or '-'}\n"
+        f"Услуга: {appt.service.name} · Мастер: {appt.master.user.full_name}\n"
+        f"Новое время: {fmt_date(new_start)} {fmt_time(new_start)}"
+    )
     await query.message.edit_text(t("my.rescheduled", user.language))  # type: ignore[union-attr]
     await state.clear()
     await query.answer()

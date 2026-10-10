@@ -57,5 +57,16 @@ class AdminCb(CallbackData, prefix="adm"):
     section: str
 
 
+class AdminApptCb(CallbackData, prefix="aappt"):
+    appointment_id: int
+    action: str  # view | reschedule | master | status | cancel
+
+
+class AdminPickCb(CallbackData, prefix="apick"):
+    appointment_id: int
+    kind: str  # master | status
+    value: str
+
+
 class SkipCb(CallbackData, prefix="skip"):
     what: str

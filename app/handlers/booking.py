@@ -413,6 +413,13 @@ async def confirm_booking(
     # Reload with relationships for notification.
     full = await AppointmentRepository(session).get(appointment.id)
     await notifier.notify_master_new(full, master_new_appt_kb(appointment.id, master.user.language))  # type: ignore[arg-type]
+    await notifier.notify_admins(
+        f"🆕 Новая запись #{full.id}\n"
+        f"Клиент: {full.client.full_name or '-'} {full.client.phone or '-'} "
+        f"{'@' + full.client.username if full.client.username else ''}\n"
+        f"Услуга: {full.service.name} · Мастер: {full.master.user.full_name}\n"
+        f"Когда: {fmt_date(full.start_at)} {fmt_time(full.start_at)}"
+    )
     await query.message.edit_text(t("book.confirmed", user.language))  # type: ignore[union-attr]
     await query.message.answer(t("menu.title", user.language), reply_markup=main_menu(user.language, is_admin))  # type: ignore[union-attr]
     await state.clear()

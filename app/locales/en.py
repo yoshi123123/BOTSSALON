@@ -150,4 +150,29 @@ EN: dict[str, str] = {
     ),
     # onboarding
     "onboarding.choose_lang": "Выберите язык / Alegeți limba / Choose language:",
+    # admin appointment editing
+    "aedit.card": (
+        "📌 Booking #{id}\n\nService: {service}\nMaster: {master}\n"
+        "Date: {date} at {time}\nStatus: {status}\nPrice: {price} {currency}\n\n"
+        "Client: {client}\nPhone: {phone}\nUsername: {username}\n"
+        "Comment: {comment}"
+    ),
+    "aedit.reschedule": "🔄 Reschedule",
+    "aedit.master": "💇 Change master",
+    "aedit.status": "🚦 Change status",
+    "aedit.cancel": "❌ Cancel booking",
+    "aedit.pick_master": "Pick a new master:",
+    "aedit.pick_status": "Pick a new status:",
+    "aedit.done": "✅ Booking updated.",
+    "aedit.cancelled": "❌ Booking cancelled by admin.",
+    "aedit.master_cant": "This master does not provide this service.",
+    "notify.admin.change": (
+        "🛠 Booking #{id} changed ({by})\n{what}\n\n"
+        "Client: {client} {phone}\nService: {service}\nMaster: {master}\n"
+        "When: {date} {time}"
+    ),
+    "notify.client.admin_changed": (
+        "ℹ️ The administrator changed your booking:\n{what}\n\n"
+        "Service: {service}\nMaster: {master}\nWhen: {date} at {time}"
+    ),
 }

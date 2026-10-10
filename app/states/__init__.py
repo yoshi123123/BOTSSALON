@@ -36,3 +36,8 @@ class MasterDeclineStates(StatesGroup):
 class BroadcastStates(StatesGroup):
     text = State()
     confirm = State()
+
+
+class AdminEditStates(StatesGroup):
+    choosing_date = State()
+    choosing_time = State()

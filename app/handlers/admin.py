@@ -54,13 +54,21 @@ async def admin_today(query: CallbackQuery, user: User, session: AsyncSession) -
         await query.message.answer(t("my.empty", user.language))  # type: ignore[union-attr]
         await query.answer()
         return
-    lines = [
-        f"{fmt_time(a.start_at)} · {a.service.name} · "
-        f"{a.master.user.full_name} · {a.client.full_name or a.client.phone or '-'} · "
-        f"{t(f'status.{a.status.value}', user.language)}"
-        for a in appts
-    ]
-    await query.message.answer("\n".join(lines))  # type: ignore[union-attr]
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    from app.keyboards.callbacks import AdminApptCb
+
+    for a in appts[:20]:
+        uname = f"@{a.client.username}" if a.client.username else "—"
+        text = (
+            f"{fmt_time(a.start_at)} · {a.service.name}\n"
+            f"Мастер: {a.master.user.full_name}\n"
+            f"Клиент: {a.client.full_name or '—'} · {a.client.phone or '—'} · {uname}\n"
+            f"Статус: {t(f'status.{a.status.value}', user.language)}"
+        )
+        b = InlineKeyboardBuilder()
+        b.button(text="🛠 Открыть", callback_data=AdminApptCb(appointment_id=a.id, action="view"))
+        await query.message.answer(text, reply_markup=b.as_markup())  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -77,14 +85,22 @@ async def admin_all(query: CallbackQuery, user: User, session: AsyncSession) -> 
         await query.message.answer(t("admin.empty", user.language))  # type: ignore[union-attr]
         await query.answer()
         return
-    lines = [t("admin.all.header", user.language)]
-    for a in appts[:30]:
-        lines.append(
-            f"{fmt_date(a.start_at)} {fmt_time(a.start_at)} · {a.service.name} · "
-            f"{a.master.user.full_name} · {a.client.full_name or a.client.phone or '-'} · "
-            f"{t(f'status.{a.status.value}', user.language)}"
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    from app.keyboards.callbacks import AdminApptCb
+
+    await query.message.answer(t("admin.all.header", user.language))  # type: ignore[union-attr]
+    for a in appts[:20]:
+        uname = f"@{a.client.username}" if a.client.username else "—"
+        text = (
+            f"{fmt_date(a.start_at)} {fmt_time(a.start_at)} · {a.service.name}\n"
+            f"Мастер: {a.master.user.full_name}\n"
+            f"Клиент: {a.client.full_name or '—'} · {a.client.phone or '—'} · {uname}\n"
+            f"Статус: {t(f'status.{a.status.value}', user.language)}"
         )
-    await query.message.answer("\n".join(lines))  # type: ignore[union-attr]
+        b = InlineKeyboardBuilder()
+        b.button(text="🛠 Открыть", callback_data=AdminApptCb(appointment_id=a.id, action="view"))
+        await query.message.answer(text, reply_markup=b.as_markup())  # type: ignore[union-attr]
     await query.answer()
 
 
@@ -173,7 +189,9 @@ async def admin_clients(query: CallbackQuery, user: User, session: AsyncSession)
         await query.answer()
         return
     items = "\n".join(
-        f"• {c.full_name or '—'} · {c.phone or '—'}" for c in clients[:50]
+        f"• {c.full_name or '—'} · {c.phone or '—'} · "
+        f"{'@' + c.username if c.username else '—'}"
+        for c in clients[:50]
     )
     await query.message.answer(  # type: ignore[union-attr]
         t("admin.clients.list", user.language, count=len(clients), items=items)

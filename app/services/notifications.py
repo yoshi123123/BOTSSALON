@@ -68,3 +68,8 @@ class NotificationService:
         self, telegram_id: int, text: str, markup: InlineKeyboardMarkup | None = None
     ) -> None:
         await self.send_telegram(telegram_id, text, markup)
+
+    async def notify_admins(self, text: str) -> None:
+        """Send a service message to every configured admin (ADMIN_IDS)."""
+        for admin_id in settings.admin_id_set:
+            await self.send_telegram(admin_id, text)
